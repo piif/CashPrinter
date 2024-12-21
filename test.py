@@ -97,7 +97,7 @@ def send(*args):
         else:
             buffer += bytes([a])
     # if debug_mode:
-    print(dump(buffer))
+    print(dump(buffer), file=sys.stderr)
     lpr.write(buffer)
 
 def recv(n, tries = 1, until=None):
@@ -240,48 +240,55 @@ class Page:
     # width and height are relative to page direction
     # thus with TOP_TO_BOTTOM and BOTTOM_TO_TOP directions, page width is paper height
     def __init__(self, width, height, direction=LEFT_TO_RIGHT):
-        self.width = width * PT_PER_MM
-        self.height = height * PT_PER_MM
+        self.width = width
+        self.height = height
         self.direction = direction
+        self.x = 0
+        self.y = 0
 
     def __enter__(self):
-        self.prepare_vertical_page()
+        self.prepare_page()
         return self
 
     def __exit__(self, e_type, e_value, e_stack):
         send(FF)
         reset()
 
-    def prepare_vertical_page(self):
+    def prepare_page(self):
         # select paper, page mode, vertical text
-        send(PRINT_TO_PAPER, ESC, 'L', ESC, 'T', self.direction)
-        # 0.2mm per point
+        send(PRINT_TO_PAPER, ESC, 'L')
+        # 0.2mm per point => 5 pt per mm
         send(GS, "P", 127, 127)
+        if self.direction in (LEFT_TO_RIGHT, RIGHT_TO_LEFT):
+            w = self.width * PT_PER_MM
+            h = self.height * PT_PER_MM
+        else:
+            w = self.height * PT_PER_MM
+            h = self.width * PT_PER_MM
+        send(ESC, 'W', 0,0, 0,0 , w % 256, w >> 8, h % 256, h >> 8)
+        # set direction
+        send(ESC, 'T', self.direction)
 
-    # x, y are relative to given direction
+    def _move_y(self, dir, value):
+        while value > 255:
+            send(ESC, dir, 255)
+            value -= 255
+        send(ESC, dir, value)
+
+    # x, y are relative to page direction
     # thus with bottom to top page, x==0 is bottom border and y==0 is left border
     def print_at(self, text, x, y):
-        if self.direction == LEFT_TO_RIGHT:
-            x = int(x * PT_PER_MM)
-            w = self.width - x
-            y = int(y * PT_PER_MM)
-            h = self.height - y
-        elif self.direction == RIGHT_TO_LEFT:
-            x = 0
-            w = self.width - int(x * PT_PER_MM)
-            y = 0
-            h = self.height - int(y * PT_PER_MM)
-        elif self.direction == TOP_TO_BOTTOM:
-            x = 0
-            w = self.height - int(y * PT_PER_MM)
-            y = int(x * PT_PER_MM)
-            h = self.width - y
-        elif self.direction == BOTTOM_TO_TOP:
-            x = int(y * PT_PER_MM)
-            w = self.height - x
-            y = 0
-            h = self.width - int(x * PT_PER_MM)
-        send(ESC, 'W', x % 256, x >> 8, y % 256, y >> 8, w % 256, w >> 8, h % 256, h >> 8)
+        x = int(x * 5)
+        if self.x != x:
+            send(ESC, '$', x % 256, x >> 8)
+            self.x = x
+        y = int(y * 5)
+        if self.y < y:
+            self._move_y('J', y - self.y)
+            self.y = y
+        elif self.y > y:
+            self._move_y('K', y - self.y)
+            self.y = y
         send(text)
 
 
