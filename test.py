@@ -1,5 +1,9 @@
-from time import sleep
+#!/usr/bin/python3
+
 import sys
+import re
+from time import sleep
+from typing import Iterator, Tuple
 
 lpr = open("/dev/usb/lp0", "r+b", buffering=0)
 
@@ -77,8 +81,24 @@ SPECIALS = {
     "US"  : US,
 }
 
+PRINT_TO_PAPER = ESC + b'c0\4'
+
+# TOOLS
+
+debug_mode = False
+
 def send(*args):
-    lpr.write(b''.join([ b if isinstance(b, bytes) else bytes([b]) for b in args ]))
+    buffer = bytes()
+    for a in args:
+        if isinstance(a, bytes):
+            buffer += a
+        elif isinstance(a, str):
+            buffer += a.encode("ascii")
+        else:
+            buffer += bytes([a])
+    # if debug_mode:
+    print(dump(buffer))
+    lpr.write(buffer)
 
 def recv(n, tries = 1, until=None):
     result = b''
@@ -96,7 +116,7 @@ def dump(array):
     i=0
     for b in array:
         result += f"{b:02X} "
-        ascii += chr(b) if b > 15 else '.'
+        ascii += chr(b) if b > 31 else '.'
         i += 1
         if i == 8:
             result += " "
@@ -111,6 +131,39 @@ def dump(array):
             result += " "
         result += f"  {ascii}\n"
     return result
+
+def tokenize(input_line: str) -> Iterator[Tuple[bool, str]]:
+    # Regular expression to match either a quoted string or a word
+    pattern = r'"([^"]*)"|(\S+)'
+    
+    # Find all matches in the input line
+    for match in re.finditer(pattern, input_line):
+        if match.group(1) is not None:  # Quoted string
+            yield (True, match.group(1))
+        elif match.group(2) is not None:  # Non-quoted word
+            yield (False, match.group(2))
+
+def parse_file(path):
+    result = bytes()
+    with open(path, "r") as f:
+        for line in f.readlines():
+            if line[0] == "'":
+                continue
+            for is_str, token in tokenize(line):
+                if is_str:
+                    result += bytes(token, "ascii")
+                elif token in SPECIALS:
+                    result += SPECIALS[token]
+                elif token.startswith("0x"):
+                    result += bytes([ int(token[2:], 16) ])
+                else:
+                    result += bytes([ int(token) ])
+    return result
+
+# COMMANDS
+
+def reset():
+    send(ESC, b'@')
 
 def status():
     send(DLE, EOT, 1)
@@ -142,37 +195,103 @@ def printer_counters():
         print(f"Counter {counter}\n", dump(recv(20,tries=2,until=0)))
 
 def beep(mode):
-    # marche pas ?
+    # does not work : no buzzer on my model
     send(ESC, b'(A', 4, 0, 48, mode, 2, 2)
 
-def parse_file(path):
-    result = bytes()
-    with open(path, "r") as f:
-        for line in f.readlines():
-            if line[0] == "'":
-                continue
-            looking_eos = False
-            for token in line.split():
-                print(f"<{token}>, {looking_eos}")
-                if looking_eos:
-                    if token.endswith('"'):
-                        result += bytes(token[:-1], "ascii")
-                        looking_eos = False
-                    else:
-                        result += bytes(token, "ascii")
-                elif token.startswith('"'):
-                    if len(token)>1 and token.endswith('"'):
-                        result += bytes(token[1:-1], "ascii")
-                    else:
-                        result += bytes(token[1:], "ascii")
-                        looking_eos = True
-                elif token in SPECIALS:
-                    result += SPECIALS[token]
-                elif token.startswith("0x"):
-                    result += bytes([ int(token[2:], 16) ])
-                else:
-                    result += bytes([ int(token) ])
-    return result
+def read_check():
+    send(FS, b'a0', 1)
+    _parse_check()
+
+def reread_check():
+    send(FS, b'b')
+    _parse_check()
+
+def eject_check():
+    send(FS, b'a2')
+
+def prepare_check_print():
+    send(FS, b'a1')
+
+def _parse_check():
+    for retry in range(1,10):
+        print(".")
+        sleep(2)
+        result = recv(40,until = 0)
+        if len(result) > 0:
+            break
+    print("Result")
+    print(dump(result))
+    if result[0] != 0x5F: # '_'
+        print(f"header error ({result[0]})")
+        return None
+    if result[1] & 0x20 == 0x20:
+        print("read error")
+        return None
+    return result[2:-1].decode("ascii")
+
+LEFT_TO_RIGHT = 0
+BOTTOM_TO_TOP = 1
+RIGHT_TO_LEFT = 2
+TOP_TO_BOTTOM = 3
+PT_PER_MM = 5
+
+# all dimension are given in mm and translated in point i inner code
+class Page:
+    # width and height are relative to page direction
+    # thus with TOP_TO_BOTTOM and BOTTOM_TO_TOP directions, page width is paper height
+    def __init__(self, width, height, direction=LEFT_TO_RIGHT):
+        self.width = width * PT_PER_MM
+        self.height = height * PT_PER_MM
+        self.direction = direction
+
+    def __enter__(self):
+        self.prepare_vertical_page()
+        return self
+
+    def __exit__(self, e_type, e_value, e_stack):
+        send(FF)
+        reset()
+
+    def prepare_vertical_page(self):
+        # select paper, page mode, vertical text
+        send(PRINT_TO_PAPER, ESC, 'L', ESC, 'T', self.direction)
+        # 0.2mm per point
+        send(GS, "P", 127, 127)
+
+    # x, y are relative to given direction
+    # thus with bottom to top page, x==0 is bottom border and y==0 is left border
+    def print_at(self, text, x, y):
+        if self.direction == LEFT_TO_RIGHT:
+            x = int(x * PT_PER_MM)
+            w = self.width - x
+            y = int(y * PT_PER_MM)
+            h = self.height - y
+        elif self.direction == RIGHT_TO_LEFT:
+            x = 0
+            w = self.width - int(x * PT_PER_MM)
+            y = 0
+            h = self.height - int(y * PT_PER_MM)
+        elif self.direction == TOP_TO_BOTTOM:
+            x = 0
+            w = self.height - int(y * PT_PER_MM)
+            y = int(x * PT_PER_MM)
+            h = self.width - y
+        elif self.direction == BOTTOM_TO_TOP:
+            x = int(y * PT_PER_MM)
+            w = self.height - x
+            y = 0
+            h = self.width - int(x * PT_PER_MM)
+        send(ESC, 'W', x % 256, x >> 8, y % 256, y >> 8, w % 256, w >> 8, h % 256, h >> 8)
+        send(text)
+
+
+def write_check(amount_digit, amount_letters, order, place, date, currency="€"):
+    with Page(170, 80, TOP_TO_BOTTOM) as p:
+        p.print_at(amount_letters, 3.5, 2)
+        p.print_at(order, 2, 3)
+        p.print_at(amount_digit, 13, 3)
+        p.print_at(date, 13, 4)
+        p.print_at(place, 13, 4.5)
 
 
 def main(args):
@@ -180,7 +299,17 @@ def main(args):
     # printer_info()
     # printer_counters()
     # beep(2)
-    parse_file("sample.txt")
+
+    # data = parse_file("example.txt")
+    # send(data)
+
+    write_check(
+        amount_digit="193.79",
+        amount_letters="cent quatre vingt treize et soixante dix neuf centimes",
+        order="pour ma pomme",
+        place="Lille",
+        date="25/12/2024"
+    )
 
 if __name__ == "__main__":
     main(sys.argv[1:])
