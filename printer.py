@@ -5,7 +5,7 @@ import re
 from time import sleep
 from typing import Iterator, Tuple
 
-lpr = open("/dev/usb/lp0", "r+b", buffering=0)
+from number import to_letters
 
 # ascii command codes
 
@@ -44,44 +44,15 @@ GS  = b'\x1D'
 RS  = b'\x1E'
 US  = b'\x1F'
 
-SPECIALS = {
-    "NUL" : NUL,
-    "OH"  : OH,
-    "STX" : STX,
-    "EXT" : EXT,
-    "EOT" : EOT,
-    "ENO" : ENO,
-    "ACK" : ACK,
-    "BEL" : BEL,
-    "BS"  : BS,
-    "HT"  : HT,
-    "LF"  : LF,
-    "VT"  : VT,
-    "FF"  : FF,
-    "CR"  : CR,
-    "SO"  : SO,
-    "SI"  : SI,
-    "DLE" : DLE,
-    "DC1" : DC1,
-    "XON" : XON,
-    "DC2" : DC2,
-    "DC3" : DC3,
-    "XOFF": XOFF,
-    "DC4" : DC4,
-    "NAK" : NAK,
-    "SYN" : SYN,
-    "ETB" : ETB,
-    "CAN" : CAN,
-    "EM"  : EM,
-    "SUB" : SUB,
-    "ESC" : ESC,
-    "FS"  : FS,
-    "GS"  : GS,
-    "RS"  : RS,
-    "US"  : US,
-}
+EURO = b'\xd5'
 
-PRINT_TO_PAPER = ESC + b'c0\4'
+SPECIALS = {
+    "NUL" : NUL,  "OH"  : OH,   "STX" : STX,  "EXT" : EXT,  "EOT" : EOT,  "ENO" : ENO,   "ACK" : ACK,  "BEL" : BEL,
+    "BS"  : BS,   "HT"  : HT,   "LF"  : LF,   "VT"  : VT,   "FF"  : FF,   "CR"  : CR,    "SO"  : SO,   "SI"  : SI,
+    "DLE" : DLE,  "DC1" : DC1,  "XON" : XON,  "DC2" : DC2,  "DC3" : DC3,  "XOFF": XOFF,  "DC4" : DC4,  "NAK" : NAK,
+    "SYN" : SYN,  "ETB" : ETB,  "CAN" : CAN,  "EM"  : EM,   "SUB" : SUB,  "ESC" : ESC,   "FS"  : FS,   "GS"  : GS,
+    "RS"  : RS,   "US"  : US,   "EURO": EURO
+}
 
 # TOOLS
 
@@ -96,8 +67,8 @@ def send(*args):
             buffer += a.encode("ascii")
         else:
             buffer += bytes([a])
-    # if debug_mode:
-    print(dump(buffer), file=sys.stderr)
+    if debug_mode:
+        print(dump(buffer), file=sys.stderr)
     lpr.write(buffer)
 
 def recv(n, tries = 1, until=None):
@@ -132,7 +103,7 @@ def dump(array):
         result += f"  {ascii}\n"
     return result
 
-def tokenize(input_line: str) -> Iterator[Tuple[bool, str]]:
+def _tokenize(input_line: str) -> Iterator[Tuple[bool, str]]:
     # Regular expression to match either a quoted string or a word
     pattern = r'"([^"]*)"|(\S+)'
     
@@ -149,7 +120,7 @@ def parse_file(path):
         for line in f.readlines():
             if line[0] == "'":
                 continue
-            for is_str, token in tokenize(line):
+            for is_str, token in _tokenize(line):
                 if is_str:
                     result += bytes(token, "ascii")
                 elif token in SPECIALS:
@@ -173,26 +144,43 @@ def status():
 def printer_info():
     send(GS, b'I1')
     sleep(0.2)
-    print("Printer model ID\n", dump(recv(1,2)))
+    print("Printer model ID\n" + dump(recv(1,2)))
 
     send(GS, b'I2')
     sleep(0.2)
-    print("Printer type ID\n", dump(recv(1,2)))
+    print("Printer type ID\n" + dump(recv(1,2)))
 
     send(GS, b'I3')
     sleep(0.2)
-    print("Printer Version ID\n", dump(recv(1,2)))
+    print("Printer Version ID\n" + dump(recv(1,2)))
 
     for info in [ 33, 35, 36, 96, 110, 65, 66, 67, 68, 69, 111, 112 ]:
         send(GS, b'I', info)
         sleep(0.2)
-        print(f"Information {info}\n", dump(recv(20,tries=2,until=0)))
+        print(f"Information {info}\n" + dump(recv(20,tries=2,until=0)))
 
+def printer_settings():
+    send(GS, "(E", 2, 0, 6, 1)
+    sleep(0.2)
+    print("NV user memory\n" + dump(recv(10,2,until=0)))
+
+    send(GS, "(E", 2, 0, 6, 2)
+    sleep(0.2)
+    print("NV bit image memory\n" + dump(recv(10,2,until=0)))
+
+    send(GS, "(E", 2, 0, 6, 5)
+    sleep(0.2)
+    print("Print density\n" + dump(recv(10,2,until=0)))
+
+    send(GS, "(E", 2, 0, 6, 118)
+    sleep(0.2)
+    print("Black color density\n" + dump(recv(10,2,until=0)))
+ 
 def printer_counters():
     for counter in range(10, 80, 10):
         send(GS, b'g2\0', counter, 0)
         sleep(0.2)
-        print(f"Counter {counter}\n", dump(recv(20,tries=2,until=0)))
+        print(f"Counter {counter}\n" + dump(recv(20,tries=2,until=0)))
 
 def beep(mode):
     # does not work : no buzzer on my model
@@ -229,44 +217,93 @@ def _parse_check():
         return None
     return result[2:-1].decode("ascii")
 
+# printer destinations and width
+TO_ROLL = 3
+ROLL_WIDTH = 80
+
+TO_PAPER = 4
+PAPER_WIDTH = 90
+
+# print orientation
 LEFT_TO_RIGHT = 0
 BOTTOM_TO_TOP = 1
 RIGHT_TO_LEFT = 2
 TOP_TO_BOTTOM = 3
-PT_PER_MM = 5
 
-# all dimension are given in mm and translated in point i inner code
+# dot/characters dimensions
+MOTION_X = 160 # horiz motion unit = 1" / MOTION_X
+MOTION_Y = 144 # vert motion unit = 1" / MOTION_Y
+CHAR_WIDTH_H = 76/40 # width of a char printed horizontaly
+CHAR_WIDTH_V = 105/50 # width of a char printed verticaly
+
+# character size
+CHAR_SINGLE = b'\x00'
+CHAR_DOUBLE_WIDTH = b'\x10'
+CHAR_DOUBLE_HEIGHT = b'\x01'
+CHAR_DOUBLE = b'\x11'
+
+def to_x(x):
+    return int(x * MOTION_X / 25.4)
+
+def to_y(y):
+    return int(y * MOTION_Y / 25.4)
+
+def to_char(x, direction = LEFT_TO_RIGHT):
+    if direction in (LEFT_TO_RIGHT, RIGHT_TO_LEFT):
+        return int(x/CHAR_WIDTH_H)
+    return int(x/CHAR_WIDTH_V)
+
+# all dimension are given in mm and translated in point in inner code
 class Page:
     # width and height are relative to page direction
     # thus with TOP_TO_BOTTOM and BOTTOM_TO_TOP directions, page width is paper height
-    def __init__(self, width, height, direction=LEFT_TO_RIGHT):
+    def __init__(self, width, height, paper=TO_PAPER, direction=LEFT_TO_RIGHT):
         self.width = width
         self.height = height
+        self.paper = paper
         self.direction = direction
         self.x = 0
         self.y = 0
 
-    def __enter__(self):
         self.prepare_page()
+
+    def __enter__(self):
         return self
 
     def __exit__(self, e_type, e_value, e_stack):
-        send(FF)
+        send(ESC, FF, CAN)
         reset()
 
     def prepare_page(self):
-        # select paper, page mode, vertical text
-        send(PRINT_TO_PAPER, ESC, 'L')
-        # 0.2mm per point => 5 pt per mm
-        send(GS, "P", 127, 127)
+        # select paper, page mode
+        send(ESC, 'c0', self.paper, ESC, 'L')
+        # # 0.2mm per point => 5 pt per mm : couldn't make it work
+        # send(GS, "P", 127, 127)
+
         if self.direction in (LEFT_TO_RIGHT, RIGHT_TO_LEFT):
-            w = self.width * PT_PER_MM
-            h = self.height * PT_PER_MM
+            w = to_x(self.width)
+            h = to_y(self.height)
         else:
-            w = self.height * PT_PER_MM
-            h = self.width * PT_PER_MM
-        send(ESC, 'W', 0,0, 0,0 , w % 256, w >> 8, h % 256, h >> 8)
+            w = to_x(self.height)
+            h = to_y(self.width)
+
+        if self.paper == TO_PAPER:
+            max_w = to_x(PAPER_WIDTH)
+        else:
+            max_w = to_x(ROLL_WIDTH)
+        if w > max_w:
+            left = 0
+            w = max_w
+        else:
+            left = max_w - w
+
+        send(ESC, 'W', left % 256, left >> 8, 0,0 , w % 256, w >> 8, h % 256, h >> 8)
+
         # set direction
+        send(ESC, 'T', self.direction)
+
+    def set_direction(self, direction):
+        self.direction = direction
         send(ESC, 'T', self.direction)
 
     def _move_y(self, dir, value):
@@ -277,31 +314,44 @@ class Page:
 
     # x, y are relative to page direction
     # thus with bottom to top page, x==0 is bottom border and y==0 is left border
-    def print_at(self, text, x, y):
-        x = int(x * 5)
-        if self.x != x:
-            send(ESC, '$', x % 256, x >> 8)
-            self.x = x
-        y = int(y * 5)
+    def print_at(self, text, x, y, size = CHAR_SINGLE):
+        indent = b' ' * to_char(x, self.direction)
+        y = to_y(y)
         if self.y < y:
             self._move_y('J', y - self.y)
             self.y = y
         elif self.y > y:
-            self._move_y('K', y - self.y)
+            self._move_y('K', self.y - y)
             self.y = y
-        send(text)
+        send(indent, GS, '!', size, text, GS, '!', CHAR_SINGLE)
 
 
-def write_check(amount_digit, amount_letters, order, place, date, currency="€"):
-    with Page(170, 80, TOP_TO_BOTTOM) as p:
-        p.print_at(amount_letters, 3.5, 2)
-        p.print_at(order, 2, 3)
-        p.print_at(amount_digit, 13, 3)
-        p.print_at(date, 13, 4)
-        p.print_at(place, 13, 4.5)
+def write_check(amount_digits, order, place, date, amount_letters=None, currency="€"):
+    if amount_letters is None:
+        amount_letters = to_letters(amount_digits)
+    amount_digits = str(amount_digits)
+    if '.' in amount_digits:
+        amount_digits = amount_digits.replace('.', currency)
+    else:
+        amount_digits += currency
+    if len(amount_letters) > 35:
+        limit = amount_letters.rfind(' ', 0, 35)
+        amount_letters2 = amount_letters[limit+1:]
+        amount_letters = amount_letters[:limit]
+    else:
+        amount_letters2 = None
+    with Page(160, 80, direction=BOTTOM_TO_TOP) as p:
+        p.print_at(amount_letters, 25, 20)
+        if amount_letters2 is not None:
+            p.print_at(amount_letters, 5, 26)
+        p.print_at(order, 0, 35)
+        p.print_at(amount_digits, 12, 32, size=CHAR_DOUBLE)
+        p.print_at(date, 125, 41)
+        p.print_at(place, 125, 48)
 
 
 def main(args):
+
     # status()
     # printer_info()
     # printer_counters()
@@ -311,12 +361,17 @@ def main(args):
     # send(data)
 
     write_check(
-        amount_digit="193.79",
-        amount_letters="cent quatre vingt treize et soixante dix neuf centimes",
+        amount_digits=193.79,
+        # amount_letters="cent quatre vingt treize et soixante dix neuf centimes",
         order="pour ma pomme",
         place="Lille",
         date="25/12/2024"
     )
+
+# open connection to printer
+lpr = open("/dev/usb/lp0", "r+b", buffering=0)
+# set char table 19 = PC858 with euro symbol at 0xD5
+send(ESC, 't', 19)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
