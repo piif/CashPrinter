@@ -6,6 +6,7 @@ from time import sleep
 from typing import Iterator, Tuple
 
 from number import to_letters
+import data.FCPE_48x40
 
 # ascii command codes
 
@@ -56,7 +57,7 @@ SPECIALS = {
 
 # TOOLS
 
-debug_mode = False
+debug_mode = True
 
 def send(*args):
     buffer = bytes()
@@ -64,7 +65,7 @@ def send(*args):
         if isinstance(a, bytes):
             buffer += a
         elif isinstance(a, str):
-            buffer += a.encode("ascii")
+            buffer += a.encode("cp1252")
         else:
             buffer += bytes([a])
     if debug_mode:
@@ -219,7 +220,7 @@ def _parse_check():
 
 # printer destinations and width
 TO_ROLL = 3
-ROLL_WIDTH = 80
+ROLL_WIDTH = 71
 
 TO_PAPER = 4
 PAPER_WIDTH = 90
@@ -231,10 +232,14 @@ RIGHT_TO_LEFT = 2
 TOP_TO_BOTTOM = 3
 
 # dot/characters dimensions
-MOTION_X = 160 # horiz motion unit = 1" / MOTION_X
-MOTION_Y = 144 # vert motion unit = 1" / MOTION_Y
-CHAR_WIDTH_H = 76/40 # width of a char printed horizontaly
-CHAR_WIDTH_V = 105/50 # width of a char printed verticaly
+MOTION_X_PAPER = 160 # horiz motion unit = 1" / MOTION_X
+MOTION_Y_PAPER = 144 # vert motion unit = 1" / MOTION_Y
+MOTION_X_ROLL  = 180
+MOTION_Y_ROLL  = 360
+CHAR_WIDTH_H_PAPER = 76/40 # width of a char printed horizontaly
+CHAR_WIDTH_V_PAPER = 105/50 # width of a char printed verticaly
+CHAR_WIDTH_H_ROLL  = 71/42
+CHAR_WIDTH_V_ROLL  = 84/50
 
 # character size
 CHAR_SINGLE = b'\x00'
@@ -242,16 +247,24 @@ CHAR_DOUBLE_WIDTH = b'\x10'
 CHAR_DOUBLE_HEIGHT = b'\x01'
 CHAR_DOUBLE = b'\x11'
 
-def to_x(x):
-    return int(x * MOTION_X / 25.4)
+def to_x(x, paper = TO_PAPER):
+    return int(x * (MOTION_X_PAPER if paper == TO_PAPER else MOTION_X_ROLL) / 25.4)
 
-def to_y(y):
-    return int(y * MOTION_Y / 25.4)
+def to_y(y, paper):
+    return int(y * (MOTION_Y_PAPER if paper == TO_PAPER else MOTION_Y_ROLL) / 25.4)
 
-def to_char(x, direction = LEFT_TO_RIGHT):
+def to_char(x, direction = LEFT_TO_RIGHT, paper = TO_PAPER):
     if direction in (LEFT_TO_RIGHT, RIGHT_TO_LEFT):
-        return int(x/CHAR_WIDTH_H)
-    return int(x/CHAR_WIDTH_V)
+        if paper == TO_PAPER:
+            ratio = CHAR_WIDTH_H_PAPER
+        else:
+            ratio = CHAR_WIDTH_H_ROLL
+    else:
+        if paper == TO_PAPER:
+            ratio = CHAR_WIDTH_V_PAPER
+        else:
+            ratio = CHAR_WIDTH_V_ROLL
+    return int(x/ratio)
 
 # all dimension are given in mm and translated in point in inner code
 class Page:
@@ -281,16 +294,16 @@ class Page:
         # send(GS, "P", 127, 127)
 
         if self.direction in (LEFT_TO_RIGHT, RIGHT_TO_LEFT):
-            w = to_x(self.width)
-            h = to_y(self.height)
+            w = to_x(self.width, self.paper)
+            h = to_y(self.height, self.paper)
         else:
-            w = to_x(self.height)
-            h = to_y(self.width)
+            w = to_x(self.height, self.paper)
+            h = to_y(self.width, self.paper)
 
         if self.paper == TO_PAPER:
-            max_w = to_x(PAPER_WIDTH)
+            max_w = to_x(PAPER_WIDTH, self.paper)
         else:
-            max_w = to_x(ROLL_WIDTH)
+            max_w = to_x(ROLL_WIDTH, self.paper)
         if w > max_w:
             left = 0
             w = max_w
@@ -316,7 +329,7 @@ class Page:
     # thus with bottom to top page, x==0 is bottom border and y==0 is left border
     def print_at(self, text, x, y, size = CHAR_SINGLE):
         indent = b' ' * to_char(x, self.direction)
-        y = to_y(y)
+        y = to_y(y, to_y)
         if self.y < y:
             self._move_y('J', y - self.y)
             self.y = y
@@ -350,6 +363,56 @@ def write_check(amount_digits, order, place, date, amount_letters=None, currency
         p.print_at(place, 125, 48)
 
 
+def write_receipt(amount_digits, order, date, reference, amount_letters=None, currency="€"):
+    with Page(78, 50, paper=TO_ROLL) as p:
+        send("- "*20, LF)
+        p.print_at("- "*20, 0, 0)
+        p.print_at(f"Reçu N° {reference}", 0, 8)
+        send(LF)
+        image(data = data.FCPE_48x40.IMAGE_DATA, indent=1)
+        p.print_at("L'association FCPE Baggio", 20, 10)
+        p.print_at("Atteste avoir reçu", 15, 28)
+        p.print_at("De {order}", 0, 38)
+        p.print_at("La somme de :", 0, 46)
+        p.print_at(amount_letters, 0, 54)
+        p.print_at(f"Le {date}", 0, 62)
+        p.print_at("- "*20, 0, 70)
+
+
+    # -------------------
+    # Reçu N° {reference}
+    # logo
+    # L'association FCPE Baggio
+    # Atteste avoir reçu de
+    # {order}
+    # La somme de {amount_letters}
+    # <double>{amount_digits}
+    # Le {date}
+    # -------------------
+    # 8<
+    # -------------------
+    # Reçu N° {reference}
+    # logo
+    # L'association FCPE Baggio
+    # Atteste avoir reçu de
+    # {order}
+    # La somme de {amount_letters}
+    # <double>{amount_digits}
+    # Le {date}
+    # -------------------
+    # 8<
+    pass
+
+def select_output(paper):
+    send(ESC, 'c0', paper, ESC, 'c1', paper)
+
+def image(data: list, indent=0):
+    send(ESC, "3", 24, ' '*indent)
+    for h in range(len(data)):
+        send(indent, ESC, "*", 0, len(data[h]), 0, bytes(data[h]))
+        send(LF)
+    send(ESC, "2")
+
 def main(args):
 
     # status()
@@ -360,18 +423,27 @@ def main(args):
     # data = parse_file("example.txt")
     # send(data)
 
-    write_check(
-        amount_digits=193.79,
-        # amount_letters="cent quatre vingt treize et soixante dix neuf centimes",
-        order="pour ma pomme",
-        place="Lille",
-        date="25/12/2024"
-    )
+    # write_check(
+    #     amount_digits=193.79,
+    #     # amount_letters="cent quatre vingt treize et soixante dix neuf centimes",
+    #     order="pour ma pomme",
+    #     place="Lille",
+    #     date="25/12/2024"
+    # )
+
+    # select_output(TO_ROLL)
+    # image(data = data.FCPE_48x40.IMAGE_DATA)
+    # # send(FF)
+
+    # reset()
+    # send('12345678901234567890123456789012345678901234567890')
+    # send(LF)
+    write_receipt(20, "Monsieur Quelqu'un", "25/10/2024", "2024_42")
 
 # open connection to printer
 lpr = open("/dev/usb/lp0", "r+b", buffering=0)
-# set char table 19 = PC858 with euro symbol at 0xD5
-send(ESC, 't', 19)
+# set char table 16 = WPC1252 with euro symbol at 0x80
+send(ESC, 't', 16)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
