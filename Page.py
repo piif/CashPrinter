@@ -49,7 +49,7 @@ class Page:
         # select paper, page mode
         self.printer.send(ESC, 'c0', self.paper, ESC, 'c1', self.paper, ESC, 'L')
         # 0.1mm per point
-        self.printer.send(GS, 'P', 254, 254)
+        self.printer.send(GS, 'P', MU_INCH, MU_INCH)
 
         max_width = self.printer.specs["WIDTH"][self.paper]
         self.horiz = self.direction in (PRINT_ORIENTATION["LEFT_TO_RIGHT"], PRINT_ORIENTATION["RIGHT_TO_LEFT"])
@@ -57,7 +57,7 @@ class Page:
         if self.horiz:
             self.width = min(self.width, max_width)
         else:
-            self.width = min(self.height, max_width)
+            self.height = min(self.height, max_width)
 
         self.left = 0
         # if paper output, must justify on the right
@@ -69,7 +69,7 @@ class Page:
 
     # x, y are relative to page direction
     # thus with bottom to top page, x==0 is bottom border and y==0 is left border
-    def print_at(self, x, y, text: str = None, size = CHARACTER_SIZE["CHAR_SINGLE"]):
+    def _move_at(self, x, y):
         x = min(x, self.width)
         y = min(y, self.height)
 
@@ -84,14 +84,20 @@ class Page:
             x, y = self.left, x
         elif self.direction == PRINT_ORIENTATION["BOTTOM_TO_TOP"]:
             w, h = self.height - y, self.width - x
-            x, y = self.left, 0
+            x, y = self.left + y, 0
 
-        x *= 10
-        y *= 10
-        w *= 10
-        h *= 10
+        x *= MU_MM
+        y *= MU_MM
+        w *= MU_MM
+        h *= MU_MM
 
         self.printer.send(ESC, 'W', x % 256, x >> 8, y % 256, y >> 8 , w % 256, w >> 8, h % 256, h >> 8)
 
-        if str is not None:
+    def print_at(self, x, y, text: str = None, size = CHARACTER_SIZE["CHAR_SINGLE"]):
+        self._move_at(x, y)
+        if text is not None:
             self.printer.send(GS, '!', size, text, GS, '!', CHARACTER_SIZE["CHAR_SINGLE"])
+
+    def image_at(self, x, y, data: bytes):
+        self._move_at(x, y)
+        self.printer.print_image(data, self.direction)

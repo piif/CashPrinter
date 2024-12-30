@@ -16,6 +16,7 @@ from payment import *
 from status_functions import *
 
 from data import FCPE_48x40
+from data import FCPE_64x48
 
 # does not work : no buzzer on my model
 def beep(printer: Printer, mode):
@@ -27,8 +28,11 @@ def test_pages(printer):
     pg.print_at(0,0, "L2R")
     for i in range(5):
         pg.print_at(i*10,8, "|>")
-    pg.print_at(0,70, "_L2R_")
-    pg.print_at(0,62, "_L2R_-8")
+    pg.print_at(0,68, "  _L2R_-2")
+    pg.print_at(15,66, "  _L2R_-4")
+    pg.print_at(30,62, "  _L2R_-8")
+
+    pg.image_at(20, 26, FCPE_64x48.IMAGE_DATA)
 
     pg = Page(printer, 60, 70, constants.PRINT_ORIENTATION["RIGHT_TO_LEFT"])
     pg.print_at(0,0, "R2L")

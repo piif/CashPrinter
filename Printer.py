@@ -1,6 +1,6 @@
 import sys
 
-import constants
+from constants import *
 from chars import *
 from parser import dump
 
@@ -8,15 +8,15 @@ class Printer:
     def __init__(
             self,
             model: str,
-            device: str = constants.PRINTER_DEVICE,
-            charset: str = constants.DEFAULT_CHARSET,
-            paper = constants.PRINTER_OUTPUT["ROLL"],
+            device: str = PRINTER_DEVICE,
+            charset: str = DEFAULT_CHARSET,
+            paper = PRINTER_OUTPUT["ROLL"],
             debug = False
     ):
         self.model = model
-        self.specs = constants.PRINTER_SPEC[model]
+        self.specs = PRINTER_SPEC[model]
         self.device = device
-        self.charset = constants.CHARSETS[charset]
+        self.charset = CHARSETS[charset]
         self.debug = debug
 
         # open connection to printer
@@ -59,12 +59,12 @@ class Printer:
         # select output for text and commands
         self.send(ESC, 'c0', self.paper, ESC, 'c1', self.paper)
 
-    def print_image(self, data: list, direction = constants.PRINT_ORIENTATION["LEFT_TO_RIGHT"]):
-        horiz = direction in (constants.PRINT_ORIENTATION["LEFT_TO_RIGHT"], constants.PRINT_ORIENTATION["RIGHT_TO_LEFT"])
+    def print_image(self, data: list, direction = PRINT_ORIENTATION["LEFT_TO_RIGHT"]):
+        horiz = direction in (PRINT_ORIENTATION["LEFT_TO_RIGHT"], PRINT_ORIENTATION["RIGHT_TO_LEFT"])
         # get DPI for "vertical" pixels depending on current printing direction
         dpi = self.specs["DPI"][self.paper][0 if horiz else 1]
-        # deduce how many motion units required to move of 8 pixels = 1inch/dpi * 8 * 10 (since motion unit is 0.1mm)
-        spacing = round((25.4/dpi*8)*10)
+        # deduce how many motion units required to move of 8 pixels = 1inch/dpi * 8 * motion_unit_per_mm
+        spacing = round((25.4/dpi*8) * MU_MM)
         self.send(ESC, "3", spacing)
         # send each line of data
         for h in range(len(data)):

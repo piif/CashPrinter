@@ -24,6 +24,11 @@ CHARSETS = {
 }
 DEFAULT_CHARSET = "WPC1252" # named WPC1252 in documentation = CP1252, with € at 0x80
 
+# motion units per inch
+MU_INCH = 254 # 127
+# motion units per mm (must match previous one)
+MU_MM = 10 # 5
+
 # printer outputs
 PRINTER_OUTPUT = {
     "ROLL"       : 0x03,
@@ -52,9 +57,9 @@ PRINTER_SPEC = {
     "TM-H6000-III": {
         "WIDTH" : {
             PRINTER_OUTPUT["ROLL"]       : 71,
-            PRINTER_OUTPUT["PAPER"]      : 90,
-            PRINTER_OUTPUT["VALIDATION"] : 90,
-            PRINTER_OUTPUT["BACK_PAPER"] : 90
+            PRINTER_OUTPUT["PAPER"]      : 85,
+            PRINTER_OUTPUT["VALIDATION"] : 85,
+            PRINTER_OUTPUT["BACK_PAPER"] : 85
         },
         "DPI" : {
             PRINTER_OUTPUT["ROLL"]       : (60, 90), # vertical, horizontal
