@@ -1,5 +1,7 @@
+#!/usr/bin/python3
+
 from PIL import Image
-import sys
+import sys, os
 
 def dump_pixel_map_to_bin(png_file: str, output_file: str = None):
     # Open the image file
@@ -65,7 +67,10 @@ def dump_pixel_map_to_hex(png_file: str, output_file: str = None, name: str = "I
     if output_file is not None:
         output.close()
 
-
-# Example usage
-dump_pixel_map_to_bin('data/FCPE-48x40.png', 'data/FCPE-48x40.txt')
-dump_pixel_map_to_hex('data/FCPE-48x40.png', 'data/FCPE-48x40.hex')
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage : {sys.argv[0]} input_file_name", file=sys.err)
+    input_path = sys.argv[1]
+    split_path = os.path.splitext(input_path)
+    dump_pixel_map_to_bin(input_path, f'{split_path[0]}.txt')
+    dump_pixel_map_to_hex(input_path, f'{split_path[0]}.py')

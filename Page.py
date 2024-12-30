@@ -25,19 +25,23 @@ from constants import *
 class Page:
     # width and height are in mm and relative to page direction
     # thus with TOP_TO_BOTTOM and BOTTOM_TO_TOP directions, page width is paper height
-    def __init__(self, printer: Printer, width, height, paper=PRINTER_OUTPUT["PAPER"], direction=PRINT_ORIENTATION["LEFT_TO_RIGHT"]):
+    def __init__(self, printer: Printer, width, height, direction=PRINT_ORIENTATION["LEFT_TO_RIGHT"]):
         self.printer = printer
         self.width = width
         self.height = height
-        self.paper = paper
+        self.paper = self.printer.paper
 
-        self.set_direction(direction)
+        self.direction = direction
+        self.printer.send(ESC, 'T', self.direction)
         self.prepare_page()
 
     def __enter__(self):
         return self
 
     def __exit__(self, e_type, e_value, e_stack):
+        self.flush()
+
+    def flush(self):
         self.printer.send(ESC, FF, CAN)
         self.printer.reset()
 
@@ -55,36 +59,32 @@ class Page:
         else:
             self.width = min(self.height, max_width)
 
-        left = 0
+        self.left = 0
         # if paper output, must justify on the right
-        if self.paper in (PRINT_ORIENTATION["PAPER"], PRINT_ORIENTATION["VALIDATION"]): # or BACK_PAPER ??
+        if self.paper in (PRINTER_OUTPUT["PAPER"], PRINTER_OUTPUT["VALIDATION"]): # or BACK_PAPER ??
             if self.horiz:
-                left = max_width - self.width
+                self.left = max_width - self.width
             else:
-                left = max_width - self.height
-
-    def set_direction(self, direction):
-        self.direction = direction
-        self.printer.send(ESC, 'T', self.direction)
+                self.left = max_width - self.height
 
     # x, y are relative to page direction
     # thus with bottom to top page, x==0 is bottom border and y==0 is left border
     def print_at(self, x, y, text: str = None, size = CHARACTER_SIZE["CHAR_SINGLE"]):
         x = min(x, self.width)
         y = min(y, self.height)
-        w, h = self.width - x , self.height - y
 
         if self.direction == PRINT_ORIENTATION["LEFT_TO_RIGHT"]:
+            w, h = self.width - x , self.height - y
             x += self.left
         elif self.direction == PRINT_ORIENTATION["RIGHT_TO_LEFT"]:
-            x, y = self.left + self.width - x , self.height - y
+            w, h = self.width - x, self.height - y
+            x, y = self.left, 0
         elif self.direction == PRINT_ORIENTATION["TOP_TO_BOTTOM"]:
-            x, y = self.left + self.height - y , x
+            w, h = self.height - y, self.width - x
+            x, y = self.left, x
         elif self.direction == PRINT_ORIENTATION["BOTTOM_TO_TOP"]:
-            x, y = self.left + y , self.width - x
-
-        if not self.horiz:
-            w, h = h, w
+            w, h = self.height - y, self.width - x
+            x, y = self.left, 0
 
         x *= 10
         y *= 10

@@ -3,92 +3,123 @@
 import sys
 import re
 from time import sleep
+from getopt import getopt, GetoptError
 
 from Printer import Printer
 from Page import Page
 from number import to_letters
 from chars import *
 from constants import *
-from parser import dump, parse_file
+from parser import dump, parse_file, parse_line
 
-from check import *
+from payment import *
 from status_functions import *
 
-import data.FCPE_48x40
+from data import FCPE_48x40
 
 # does not work : no buzzer on my model
 def beep(printer: Printer, mode):
     printer.send(ESC, b'(A', 4, 0, 48, mode, 2, 2)
 
 
-def write_receipt(printer: Printer, amount_digits, order, date, reference, amount_letters=None, currency="€"):
-    with Page(78, 80, paper=PRINTER_OUTPUT["ROLL"]) as page:
-        printer.send("- "*20)
-        page.print_at("- "*20, 0, 0)
-        page.print_at(f"Reçu N° {reference}", 0, 8)
-        page.print_at("L'association FCPE Baggio", 20, 10)
-        page.print_at("Atteste avoir reçu", 15, 28)
-        page.print_at("De {order}", 0, 38)
-        page.print_at("La somme de :", 0, 46)
-        page.print_at(amount_letters, 0, 54)
-        page.print_at(f"Le {date}", 0, 62)
-        page.print_at("- "*20, 0, 70)
-        printer.send(LF)
-        printer.print_image(data = data.FCPE_48x40.IMAGE_DATA, indent=1)
+def test_pages(printer):
+    pg = Page(printer, 60, 70, constants.PRINT_ORIENTATION["LEFT_TO_RIGHT"])
+    pg.print_at(0,0, "L2R")
+    for i in range(5):
+        pg.print_at(i*10,8, "|>")
+    pg.print_at(0,70, "_L2R_")
+    pg.print_at(0,62, "_L2R_-8")
 
+    pg = Page(printer, 60, 70, constants.PRINT_ORIENTATION["RIGHT_TO_LEFT"])
+    pg.print_at(0,0, "R2L")
+    for i in range(5):
+        pg.print_at(i*10,8, "|<")
 
-    # -------------------
-    # Reçu N° {reference}
-    # logo
-    # L'association FCPE Baggio
-    # Atteste avoir reçu de
-    # {order}
-    # La somme de {amount_letters}
-    # <double>{amount_digits}
-    # Le {date}
-    # -------------------
-    # 8<
-    # -------------------
-    # Reçu N° {reference}
-    # logo
-    # L'association FCPE Baggio
-    # Atteste avoir reçu de
-    # {order}
-    # La somme de {amount_letters}
-    # <double>{amount_digits}
-    # Le {date}
-    # -------------------
-    # 8<
-    pass
+    pg = Page(printer, 70, 60, constants.PRINT_ORIENTATION["TOP_TO_BOTTOM"])
+    pg.print_at(0,0, "T2B")
+    for i in range(5):
+        pg.print_at(i*10,8, "|v")
+
+    pg = Page(printer, 70, 60, constants.PRINT_ORIENTATION["BOTTOM_TO_TOP"])
+    pg.print_at(0,0, "B2T")
+    for i in range(5):
+        pg.print_at(i*10,8, "|^")
+
+    pg.flush()
 
 def main(args):
-    printer = Printer(model = "TM-H6000-III", debug = True)
+    model = "TM-H6000-III"
+    debug = False
+    device = "/dev/usb/lp0"
+    output = None
+    test=None
 
-    # status(printer)
-    # printer_info(printer)
-    # printer_counters(printer)
-    # beep(printer, 2)
+    try:
+        opts, args = getopt(args, "dD:M:T:O:", ["debug", "device=", "model=", "test=", "output="])
+    except GetoptError as err:
+        print(err)
+        sys.exit(2)
 
-    # data = parse_file("example.txt")
-    # printer.send(data)
+    for o, a in opts:
+        if o in ("-d", "--debug"):
+            debug = True
+        elif o in ("-D", "--device"):
+            device = a
+        elif o in ("-M", "--model"):
+            model = a
+        elif o in ("-T", "--test"):
+            test = a
+        elif o in ("-O", "--output"):
+            output = a
+        else:
+            raise ValueError(f"unhandled option {o}")
 
-    # write_check(printer,
-    #     amount_digits=193.79,
-    #     # amount_letters="cent quatre vingt treize et soixante dix neuf centimes",
-    #     order="pour ma pomme",
-    #     place="Lille",
-    #     date="25/12/2024"
-    # )
+    if output is None or output == "roll":
+        paper = constants.PRINTER_OUTPUT["ROLL"]
+    elif output == "paper":
+        paper = constants.PRINTER_OUTPUT["PAPER"]
+    else:
+        raise ValueError(f"unknown output {output} (must be ROLL or PAPER)")
 
-    printer.select_output(constants.PRINTER_OUTPUT["PAPER"])
-    printer.print_image(data = data.FCPE_48x40.IMAGE_DATA)
-    printer.send(FF)
+    printer = Printer(model = model, debug = debug, device = device, paper = paper)
+
+    if test is None:
+        pass
+    elif test == "status":
+        status(printer)
+    elif test == "printer_info":
+        printer_info(printer)
+    elif test == "printer_counters":
+        printer_counters(printer)
+    elif test == "beep":
+        beep(printer, 2)
+    elif test == "christmas":
+        data = parse_file("data/christmas_coupon.txt")
+        printer.send(data)
+    elif test == "write_check":
+        write_check(printer,
+            amount_digits=193.79,
+            # amount_letters="cent quatre vingt treize euros et soixante dix neuf centimes",
+            order="pour ma pomme",
+            place="Lille",
+            date="25/12/2024"
+        )
+    elif test == "image":
+        printer.print_image(data = FCPE_48x40.IMAGE_DATA)
+        # printer.send(FF)
+    elif test == "pages":
+        test_pages(printer)
+    elif test == "write_receipt":
+        write_receipt(printer, 20, "Monsieur Quelqu'un", "25/12/2024", "2024_042")
+
+    if len(args) > 0:
+        data = parse_line(" ".join(args))
+        printer.send(data)
 
     # reset()
     # printer.send('12345678901234567890123456789012345678901234567890')
     # printer.send(LF)
 
-    # write_receipt(printer, 20, "Monsieur Quelqu'un", "25/10/2024", "2024_42")
 
 if __name__ == "__main__":
     main(sys.argv[1:])

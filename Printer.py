@@ -56,14 +56,20 @@ class Printer:
 
     def select_output(self, paper):
         self.paper = paper
+        # select output for text and commands
         self.send(ESC, 'c0', self.paper, ESC, 'c1', self.paper)
 
     def print_image(self, data: list, direction = constants.PRINT_ORIENTATION["LEFT_TO_RIGHT"]):
-        dpi = self.specs["DPI"][self.paper][0 if direction in (constants.PRINT_ORIENTATION["LEFT_TO_RIGHT"], constants.PRINT_ORIENTATION["RIGHT_TO_LEFT"]) else 1]
+        horiz = direction in (constants.PRINT_ORIENTATION["LEFT_TO_RIGHT"], constants.PRINT_ORIENTATION["RIGHT_TO_LEFT"])
+        # get DPI for "vertical" pixels depending on current printing direction
+        dpi = self.specs["DPI"][self.paper][0 if horiz else 1]
+        # deduce how many motion units required to move of 8 pixels = 1inch/dpi * 8 * 10 (since motion unit is 0.1mm)
         spacing = round((25.4/dpi*8)*10)
         self.send(ESC, "3", spacing)
+        # send each line of data
         for h in range(len(data)):
             l = len(data[h])
             self.send(ESC, "*", 0, l % 256, l >> 8, bytes(data[h]))
             self.send(LF)
+        # go back to default line spacing
         self.send(ESC, "2")

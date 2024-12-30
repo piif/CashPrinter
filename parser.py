@@ -28,17 +28,21 @@ def parse_file(path):
         for line in f.readlines():
             if line[0] == "'":
                 continue
-            for is_str, token in _tokenize(line):
-                if is_str:
-                    result += bytes(token, "ascii")
-                elif token in SPECIALS:
-                    result += SPECIALS[token]
-                elif token.startswith("0x"):
-                    result += bytes([ int(token[2:], 16) ])
-                else:
-                    result += bytes([ int(token) ])
+            result += parse_line(line)
     return result
 
+def parse_line(line):
+    result = bytes()
+    for is_str, token in _tokenize(line):
+        if is_str:
+            result += bytes(token, "ascii")
+        elif token in SPECIALS:
+            result += SPECIALS[token]
+        elif token.startswith("0x"):
+            result += bytes([ int(token[2:], 16) ])
+        else:
+            result += bytes([ int(token) ])
+    return result
 
 
 def dump(array):
@@ -46,8 +50,15 @@ def dump(array):
     ascii = ""
     i=0
     for b in array:
+        bb = bytes([b])
         result += f"{b:02X} "
-        ascii += bytes([b]).decode("cp1252") if b > 31 and b not in (0x81, 0x8D, 0x8F, 0x90, 0x9D) else '.'
+        if bb in (ESC, GS, FF, LF):
+            ascii += chr(0x2400 + b)
+        elif b > 0x20 and b <= 0x80: # not in (0x81, 0x8D, 0x8F, 0x90, 0x9D)
+            ascii += bb.decode("cp1252")
+        else:
+            ascii += '.'
+        # ascii += bb.decode("cp1252") if b > 31 and b not in (0x81, 0x8D, 0x8F, 0x90, 0x9D) else '.'
         i += 1
         if i == 8:
             result += " "
